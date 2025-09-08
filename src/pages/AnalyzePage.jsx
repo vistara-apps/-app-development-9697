@@ -5,6 +5,9 @@ import AuthModal from '../components/AuthModal'
 import AudioUploader from '../components/AudioUploader'
 import VideoUploader from '../components/VideoUploader'
 import AnalysisResult from '../components/AnalysisResult'
+import { hasReachedAnalysisLimit } from '../lib/stripe'
+import { uploadFile, saveAnalysis } from '../lib/database'
+import { analyzeVocalization, analyzeBodyLanguage } from '../lib/openai'
 import toast from 'react-hot-toast'
 
 const AnalyzePage = () => {
@@ -21,7 +24,6 @@ const AnalyzePage = () => {
     }
 
     // Check subscription limits
-    const { hasReachedAnalysisLimit } = await import('../lib/stripe')
     if (hasReachedAnalysisLimit(user.subscriptionTier, user.analysisCount)) {
       toast.error('Analysis limit reached. Upgrade to continue analyzing.')
       return
@@ -31,19 +33,16 @@ const AnalyzePage = () => {
     
     try {
       // Upload file first
-      const { uploadFile } = await import('../lib/database')
       const uploadResult = await uploadFile(file, 'analyses')
       
       // Perform AI analysis
       let analysisResult
       if (type === 'audio') {
-        const { analyzeVocalization } = await import('../lib/openai')
         analysisResult = await analyzeVocalization(
           `Audio file: ${file.name}, size: ${file.size} bytes`,
           user.petProfile
         )
       } else {
-        const { analyzeBodyLanguage } = await import('../lib/openai')
         analysisResult = await analyzeBodyLanguage(
           `Video file: ${file.name}, size: ${file.size} bytes`,
           user.petProfile
@@ -51,7 +50,6 @@ const AnalyzePage = () => {
       }
 
       // Save analysis to database
-      const { saveAnalysis } = await import('../lib/database')
       const savedAnalysis = await saveAnalysis(user.id, {
         ...analysisResult,
         fileName: file.name,
@@ -68,8 +66,7 @@ const AnalyzePage = () => {
       
       setAnalysis(result)
       
-      // Update user's analysis count
-      const { updateUser } = await import('../contexts/AuthContext')
+      // Update user's analysis count (handled by the auth context automatically)
       if (user.id !== '1') { // Don't update for mock user
         user.analysisCount = (user.analysisCount || 0) + 1
       }

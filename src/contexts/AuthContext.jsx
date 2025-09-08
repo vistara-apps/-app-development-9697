@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react'
-import { supabase, TABLES, SUBSCRIPTION_TIERS } from '../lib/supabase'
+import { supabase, TABLES, SUBSCRIPTION_TIERS, hasSupabaseCredentials } from '../lib/supabase'
 
 const AuthContext = createContext({})
 
@@ -19,11 +19,20 @@ export const AuthProvider = ({ children }) => {
     // Get initial session
     const getInitialSession = async () => {
       try {
-        const { data: { session }, error } = await supabase.auth.getSession()
-        if (error) throw error
-        
-        if (session?.user) {
-          await loadUserProfile(session.user)
+        // Only try Supabase if we have credentials
+        if (hasSupabaseCredentials()) {
+          const { data: { session }, error } = await supabase.auth.getSession()
+          if (error) throw error
+          
+          if (session?.user) {
+            await loadUserProfile(session.user)
+          }
+        } else {
+          // Fallback to mock for demo when no credentials
+          const savedUser = localStorage.getItem('wildsound_user')
+          if (savedUser) {
+            setUser(JSON.parse(savedUser))
+          }
         }
       } catch (error) {
         console.error('Error getting initial session:', error)
@@ -39,17 +48,21 @@ export const AuthProvider = ({ children }) => {
 
     getInitialSession()
 
-    // Listen for auth changes
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      if (session?.user) {
-        await loadUserProfile(session.user)
-      } else {
-        setUser(null)
-      }
-      setLoading(false)
-    })
+    // Listen for auth changes only if we have credentials
+    let subscription = null
+    if (hasSupabaseCredentials()) {
+      const { data } = supabase.auth.onAuthStateChange(async (event, session) => {
+        if (session?.user) {
+          await loadUserProfile(session.user)
+        } else {
+          setUser(null)
+        }
+        setLoading(false)
+      })
+      subscription = data
+    }
 
-    return () => subscription.unsubscribe()
+    return () => subscription?.unsubscribe()
   }, [])
 
   const loadUserProfile = async (authUser) => {
@@ -113,13 +126,18 @@ export const AuthProvider = ({ children }) => {
 
   const signIn = async (email, password) => {
     try {
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email,
-        password
-      })
-      
-      if (error) throw error
-      return data.user
+      if (hasSupabaseCredentials()) {
+        const { data, error } = await supabase.auth.signInWithPassword({
+          email,
+          password
+        })
+        
+        if (error) throw error
+        return data.user
+      } else {
+        // Mock sign in for demo
+        throw new Error('Demo mode - using mock authentication')
+      }
     } catch (error) {
       console.error('Sign in error:', error)
       // Fallback to mock for demo
@@ -138,13 +156,18 @@ export const AuthProvider = ({ children }) => {
 
   const signUp = async (email, password) => {
     try {
-      const { data, error } = await supabase.auth.signUp({
-        email,
-        password
-      })
-      
-      if (error) throw error
-      return data.user
+      if (hasSupabaseCredentials()) {
+        const { data, error } = await supabase.auth.signUp({
+          email,
+          password
+        })
+        
+        if (error) throw error
+        return data.user
+      } else {
+        // Mock sign up for demo
+        throw new Error('Demo mode - using mock authentication')
+      }
     } catch (error) {
       console.error('Sign up error:', error)
       // Fallback to mock for demo
@@ -163,8 +186,10 @@ export const AuthProvider = ({ children }) => {
 
   const signOut = async () => {
     try {
-      const { error } = await supabase.auth.signOut()
-      if (error) throw error
+      if (hasSupabaseCredentials()) {
+        const { error } = await supabase.auth.signOut()
+        if (error) throw error
+      }
     } catch (error) {
       console.error('Sign out error:', error)
     } finally {
