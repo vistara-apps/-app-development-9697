@@ -5,6 +5,9 @@ import AuthModal from '../components/AuthModal'
 import AudioUploader from '../components/AudioUploader'
 import VideoUploader from '../components/VideoUploader'
 import AnalysisResult from '../components/AnalysisResult'
+import { hasReachedAnalysisLimit } from '../lib/stripe'
+import { uploadFile, saveAnalysis } from '../lib/database'
+import { analyzeVocalization, analyzeBodyLanguage } from '../lib/openai'
 import toast from 'react-hot-toast'
 
 const AnalyzePage = () => {
@@ -21,38 +24,60 @@ const AnalyzePage = () => {
     }
 
     // Check subscription limits
-    if (user.subscriptionTier === 'free' && user.analysisCount >= 3) {
-      toast.error('Free tier limit reached. Upgrade to continue analyzing.')
+    if (hasReachedAnalysisLimit(user.subscriptionTier, user.analysisCount)) {
+      toast.error('Analysis limit reached. Upgrade to continue analyzing.')
       return
     }
 
     setIsAnalyzing(true)
     
-    // Simulate API call
-    setTimeout(() => {
-      const mockResult = {
-        id: Date.now(),
+    try {
+      // Upload file first
+      const uploadResult = await uploadFile(file, 'analyses')
+      
+      // Perform AI analysis
+      let analysisResult
+      if (type === 'audio') {
+        analysisResult = await analyzeVocalization(
+          `Audio file: ${file.name}, size: ${file.size} bytes`,
+          user.petProfile
+        )
+      } else {
+        analysisResult = await analyzeBodyLanguage(
+          `Video file: ${file.name}, size: ${file.size} bytes`,
+          user.petProfile
+        )
+      }
+
+      // Save analysis to database
+      const savedAnalysis = await saveAnalysis(user.id, {
+        ...analysisResult,
+        fileName: file.name,
+        filePath: uploadResult.path
+      })
+
+      const result = {
+        id: savedAnalysis.id || Date.now(),
         type,
         fileName: file.name,
         timestamp: new Date().toISOString(),
-        emotion: type === 'audio' ? 'Happy' : 'Playful',
-        confidence: Math.floor(Math.random() * 20) + 80,
-        intent: type === 'audio' ? 'Greeting' : 'Attention Seeking',
-        urgency: ['Low', 'Medium', 'High'][Math.floor(Math.random() * 3)],
-        description: type === 'audio' 
-          ? 'Your pet is expressing joy and excitement, likely greeting you or anticipating something positive.'
-          : 'Your pet is in a playful mood and is seeking attention or interaction.',
-        suggestions: [
-          'Engage in interactive play for 10-15 minutes',
-          'Provide mental stimulation with puzzle toys',
-          'Consider a short training session with treats'
-        ]
+        ...analysisResult
       }
       
-      setAnalysis(mockResult)
+      setAnalysis(result)
+      
+      // Update user's analysis count (handled by the auth context automatically)
+      if (user.id !== '1') { // Don't update for mock user
+        user.analysisCount = (user.analysisCount || 0) + 1
+      }
+      
+      toast.success('Analysis completed successfully!')
+    } catch (error) {
+      console.error('Analysis error:', error)
+      toast.error('Analysis failed. Please try again.')
+    } finally {
       setIsAnalyzing(false)
-      toast.success('Analysis complete!')
-    }, 3000)
+    }
   }
 
   const tabs = [
